@@ -305,7 +305,7 @@
             <div class="button-container">
                 <button class="start-btn" id="startBtn" disabled>🎬 動画生成スタート</button>
                 <button class="play-btn" id="playBtn">▶️ 再生</button>
-                <button class="download-btn" id="downloadBtn">💾 GIFをダウンロード</button>
+                <button class="download-btn" id="downloadBtn">🎥 動画をダウンロード</button>
             </div>
         </div>
         
@@ -322,7 +322,6 @@
         </div>
     </div>
 
-    <script src="https://cdnjs.cloudflare.com/ajax/libs/gif.js/0.2.0/gif.js"></script>
     <script>
         let beforeImg = null;
         let afterImg = null;
@@ -332,7 +331,9 @@
         let animationId = null;
         let currentFrameIndex = 0;
         let duration = 5;
-        let gifBlob = null;
+        let videoBlob = null;
+        let mediaRecorder = null;
+        let recordedChunks = [];
 
         // 画像アップロード処理
         document.getElementById('beforeImage').addEventListener('change', function(e) {
@@ -454,8 +455,8 @@
                 }
             }
             
-            // GIF生成
-            await generateGIF(width, height, fps);
+            // 動画生成
+            await generateVideo(width, height, fps);
             
             // 最初のフレームを表示
             ctx.putImageData(frames[0], 0, 0);
@@ -477,22 +478,70 @@
             isGenerating = false;
         }
 
-        // GIF生成
-        async function generateGIF(width, height, fps) {
+        // 動画生成（WebM形式）
+        async function generateVideo(width, height, fps) {
             return new Promise((resolve) => {
-                // GIF.jsを使わない簡易的な方法
-                const canvas = document.createElement('canvas');
-                canvas.width = width;
-                canvas.height = height;
+                const canvas = document.getElementById('canvas');
                 const ctx = canvas.getContext('2d');
                 
-                // 最後のフレームを静止画として保存
-                ctx.putImageData(frames[frames.length - 1], 0, 0);
-                
-                canvas.toBlob((blob) => {
-                    gifBlob = blob;
+                // MediaRecorderがサポートされているか確認
+                if (typeof MediaRecorder === 'undefined') {
+                    console.warn('MediaRecorder not supported, falling back to animated display');
+                    videoBlob = null;
                     resolve();
-                }, 'image/png');
+                    return;
+                }
+                
+                // ストリームの取得
+                const stream = canvas.captureStream(fps);
+                const options = {
+                    mimeType: 'video/webm;codecs=vp9',
+                    videoBitsPerSecond: 5000000 // 5 Mbps
+                };
+                
+                // フォールバック用のMIMEタイプ
+                if (!MediaRecorder.isTypeSupported(options.mimeType)) {
+                    options.mimeType = 'video/webm';
+                    if (!MediaRecorder.isTypeSupported(options.mimeType)) {
+                        options.mimeType = 'video/webm;codecs=vp8';
+                    }
+                }
+                
+                recordedChunks = [];
+                mediaRecorder = new MediaRecorder(stream, options);
+                
+                mediaRecorder.ondataavailable = (event) => {
+                    if (event.data.size > 0) {
+                        recordedChunks.push(event.data);
+                    }
+                };
+                
+                mediaRecorder.onstop = () => {
+                    videoBlob = new Blob(recordedChunks, { type: 'video/webm' });
+                    resolve();
+                };
+                
+                // 録画開始
+                mediaRecorder.start();
+                
+                // アニメーションを録画
+                let frameIndex = 0;
+                const frameDelay = 1000 / fps;
+                
+                function recordFrame() {
+                    if (frameIndex < frames.length) {
+                        ctx.putImageData(frames[frameIndex], 0, 0);
+                        frameIndex++;
+                        setTimeout(recordFrame, frameDelay);
+                    } else {
+                        // 録画終了
+                        setTimeout(() => {
+                            mediaRecorder.stop();
+                        }, 100);
+                    }
+                }
+                
+                recordFrame();
             });
         }
 
@@ -580,29 +629,69 @@
         document.getElementById('downloadBtn').addEventListener('click', function() {
             if (frames.length === 0) return;
             
-            // アニメーションGIFを作成
-            const canvas = document.getElementById('canvas');
-            const ctx = canvas.getContext('2d');
-            
-            // 複数フレームを結合した画像を作成
-            const combinedCanvas = document.createElement('canvas');
-            combinedCanvas.width = canvas.width;
-            combinedCanvas.height = canvas.height;
-            const combinedCtx = combinedCanvas.getContext('2d');
-            
-            // 中間フレームを選択して表示
-            const middleFrame = Math.floor(frames.length / 2);
-            combinedCtx.putImageData(frames[middleFrame], 0, 0);
-            
-            // ダウンロード
-            combinedCanvas.toBlob((blob) => {
-                const url = URL.createObjectURL(blob);
+            // 動画が生成されている場合はそれをダウンロード
+            if (videoBlob) {
+                const url = URL.createObjectURL(videoBlob);
                 const link = document.createElement('a');
-                link.download = `aha_experience_${Date.now()}.png`;
+                link.download = `aha_experience_${Date.now()}.webm`;
                 link.href = url;
                 link.click();
                 URL.revokeObjectURL(url);
-            }, 'image/png');
+            } else {
+                // フォールバック：動画を再生成してダウンロード
+                const canvas = document.getElementById('canvas');
+                const ctx = canvas.getContext('2d');
+                const fps = 30;
+                
+                const stream = canvas.captureStream(fps);
+                const options = {
+                    mimeType: 'video/webm;codecs=vp9',
+                    videoBitsPerSecond: 5000000
+                };
+                
+                if (!MediaRecorder.isTypeSupported(options.mimeType)) {
+                    options.mimeType = 'video/webm';
+                }
+                
+                const chunks = [];
+                const recorder = new MediaRecorder(stream, options);
+                
+                recorder.ondataavailable = (e) => {
+                    if (e.data.size > 0) {
+                        chunks.push(e.data);
+                    }
+                };
+                
+                recorder.onstop = () => {
+                    const blob = new Blob(chunks, { type: 'video/webm' });
+                    const url = URL.createObjectURL(blob);
+                    const link = document.createElement('a');
+                    link.download = `aha_experience_${Date.now()}.webm`;
+                    link.href = url;
+                    link.click();
+                    URL.revokeObjectURL(url);
+                };
+                
+                recorder.start();
+                
+                // アニメーション再生しながら録画
+                let frameIndex = 0;
+                const frameDelay = 1000 / fps;
+                
+                function playAndRecord() {
+                    if (frameIndex < frames.length) {
+                        ctx.putImageData(frames[frameIndex], 0, 0);
+                        frameIndex++;
+                        setTimeout(playAndRecord, frameDelay);
+                    } else {
+                        setTimeout(() => {
+                            recorder.stop();
+                        }, 100);
+                    }
+                }
+                
+                playAndRecord();
+            }
         });
     </script>
 </body>
