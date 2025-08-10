@@ -324,8 +324,7 @@
             <div class="button-container">
                 <button class="start-btn" id="startBtn" disabled>🎬 動画生成スタート</button>
                 <button class="play-btn" id="playBtn">▶️ 再生</button>
-                <button class="download-btn" id="downloadBtn">🎥 MP4動画をダウンロード</button>
-                <button class="download-btn" id="downloadGifBtn" style="display: none;">🎞️ GIFをダウンロード</button>
+                <button class="download-btn" id="downloadBtn">🎥 WebM動画をダウンロード</button>
             </div>
         </div>
         
@@ -344,7 +343,6 @@
         </div>
     </div>
 
-    <script src="https://cdnjs.cloudflare.com/ajax/libs/gif.js/0.2.0/gif.js"></script>
     <script>
         let beforeImg = null;
         let afterImg = null;
@@ -355,7 +353,6 @@
         let currentFrameIndex = 0;
         let duration = 5;
         let videoBlob = null;
-        let gifWorkerScript = 'https://cdnjs.cloudflare.com/ajax/libs/gif.js/0.2.0/gif.worker.js';
 
         // Upload box click handlers
         document.getElementById('beforeBox').addEventListener('click', function() {
@@ -530,7 +527,6 @@
             document.getElementById('startBtn').textContent = '🎬 動画生成スタート';
             document.getElementById('playBtn').style.display = 'inline-block';
             document.getElementById('downloadBtn').style.display = 'inline-block';
-            document.getElementById('downloadGifBtn').style.display = 'inline-block';
             document.getElementById('playbackControls').style.display = 'flex';
             
             // スライダー設定
@@ -858,104 +854,6 @@
             document.getElementById('downloadBtn').disabled = false;
             document.getElementById('downloadBtn').textContent = '🎥 MP4動画をダウンロード';
         });
-
-        // GIFダウンロード機能
-        document.getElementById('downloadGifBtn').addEventListener('click', async function() {
-            if (frames.length === 0) return;
-            
-            document.getElementById('downloadGifBtn').disabled = true;
-            document.getElementById('downloadGifBtn').textContent = '⏳ GIF生成中...';
-            
-            try {
-                const canvas = document.getElementById('canvas');
-                const ctx = canvas.getContext('2d');
-                
-                // GIF.jsを使用してGIFを生成
-                const gif = new GIF({
-                    workers: 2,
-                    quality: 10,
-                    width: canvas.width,
-                    height: canvas.height,
-                    workerScript: gifWorkerScript
-                });
-                
-                // フレームを追加
-                const fps = 30;
-                const delay = 1000 / fps; // ミリ秒
-                
-                for (let i = 0; i < frames.length; i++) {
-                    ctx.putImageData(frames[i], 0, 0);
-                    gif.addFrame(ctx, {copy: true, delay: delay});
-                    
-                    // 進捗更新
-                    if (i % 10 === 0) {
-                        const progress = Math.floor((i / frames.length) * 100);
-                        document.getElementById('downloadGifBtn').textContent = `⏳ GIF生成中... ${progress}%`;
-                    }
-                }
-                
-                gif.on('finished', function(blob) {
-                    const url = URL.createObjectURL(blob);
-                    const link = document.createElement('a');
-                    link.download = `aha_experience_${Date.now()}.gif`;
-                    link.href = url;
-                    link.style.display = 'none';
-                    document.body.appendChild(link);
-                    link.click();
-                    document.body.removeChild(link);
-                    
-                    setTimeout(() => {
-                        URL.revokeObjectURL(url);
-                    }, 100);
-                    
-                    document.getElementById('downloadGifBtn').disabled = false;
-                    document.getElementById('downloadGifBtn').textContent = '🎞️ GIFをダウンロード';
-                    showStatus('GIFアニメーションをダウンロードしました', 'success');
-                });
-                
-                gif.on('error', function(error) {
-                    console.error('GIF generation error:', error);
-                    document.getElementById('downloadGifBtn').disabled = false;
-                    document.getElementById('downloadGifBtn').textContent = '🎞️ GIFをダウンロード';
-                    showStatus('GIF生成に失敗しました', 'error');
-                });
-                
-                // GIF生成開始
-                gif.render();
-                
-            } catch (error) {
-                console.error('GIF creation error:', error);
-                
-                // フォールバック: 簡易的な方法で静止画を保存
-                canvas.toBlob((blob) => {
-                    const url = URL.createObjectURL(blob);
-                    const link = document.createElement('a');
-                    link.download = `aha_experience_${Date.now()}.png`;
-                    link.href = url;
-                    link.style.display = 'none';
-                    document.body.appendChild(link);
-                    link.click();
-                    document.body.removeChild(link);
-                    URL.revokeObjectURL(url);
-                }, 'image/png');
-                
-                document.getElementById('downloadGifBtn').disabled = false;
-                document.getElementById('downloadGifBtn').textContent = '🎞️ GIFをダウンロード';
-                showStatus('GIF生成に失敗したため、静止画として保存しました', 'error');
-            }
-        });
-
-        function downloadVideo(blob) {
-            const url = URL.createObjectURL(blob);
-            const link = document.createElement('a');
-            link.download = `aha_experience_${Date.now()}.webm`;
-            link.href = url;
-            document.body.appendChild(link);
-            link.click();
-            document.body.removeChild(link);
-            URL.revokeObjectURL(url);
-            showStatus('動画をダウンロードしました', 'success');
-        }
 
         function downloadAsImage() {
             const canvas = document.getElementById('canvas');
