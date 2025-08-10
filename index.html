@@ -542,7 +542,7 @@
             isGenerating = false;
         }
 
-        // 動画Blob生成
+        // 動画Blob生成（改善版）
         async function createVideoBlob(width, height, fps) {
             return new Promise((resolve) => {
                 const canvas = document.getElementById('canvas');
@@ -560,17 +560,28 @@
                     // ストリームの取得
                     const stream = canvas.captureStream(fps);
                     
-                    // 利用可能なMIMEタイプを確認
+                    // 利用可能なMIMEタイプを確認（MP4対応を優先）
                     let mimeType = 'video/webm';
-                    if (MediaRecorder.isTypeSupported('video/webm;codecs=vp9')) {
-                        mimeType = 'video/webm;codecs=vp9';
-                    } else if (MediaRecorder.isTypeSupported('video/webm;codecs=vp8')) {
-                        mimeType = 'video/webm;codecs=vp8';
+                    const possibleTypes = [
+                        'video/mp4',
+                        'video/webm;codecs=h264',
+                        'video/webm;codecs=vp9',
+                        'video/webm;codecs=vp8',
+                        'video/webm'
+                    ];
+                    
+                    for (const type of possibleTypes) {
+                        if (MediaRecorder.isTypeSupported(type)) {
+                            mimeType = type;
+                            break;
+                        }
                     }
+                    
+                    console.log('Using MIME type:', mimeType);
                     
                     const options = {
                         mimeType: mimeType,
-                        videoBitsPerSecond: 2500000 // 2.5 Mbps
+                        videoBitsPerSecond: 5000000 // 5 Mbps（高品質）
                     };
                     
                     const recordedChunks = [];
@@ -579,12 +590,15 @@
                     mediaRecorder.ondataavailable = (event) => {
                         if (event.data && event.data.size > 0) {
                             recordedChunks.push(event.data);
+                            console.log('Chunk recorded:', event.data.size, 'bytes');
                         }
                     };
                     
                     mediaRecorder.onstop = () => {
-                        videoBlob = new Blob(recordedChunks, { type: mimeType });
-                        console.log('動画Blob生成完了:', videoBlob.size, 'bytes');
+                        // 正しいMIMEタイプでBlobを生成
+                        const finalMimeType = mimeType.includes('mp4') ? 'video/mp4' : 'video/webm';
+                        videoBlob = new Blob(recordedChunks, { type: finalMimeType });
+                        console.log('Video Blob created:', videoBlob.size, 'bytes, type:', finalMimeType);
                         resolve();
                     };
                     
@@ -595,26 +609,40 @@
                     };
                     
                     // 録画開始
-                    mediaRecorder.start();
+                    mediaRecorder.start(100); // 100msごとにデータを取得
+                    console.log('Recording started');
                     
-                    // アニメーションを録画
+                    // アニメーションを録画（改善版）
                     let frameIndex = 0;
                     const frameDelay = 1000 / fps;
+                    const startTime = Date.now();
                     
                     function recordFrame() {
                         if (frameIndex < frames.length) {
+                            // フレームを描画
                             ctx.putImageData(frames[frameIndex], 0, 0);
+                            
+                            // 次のフレーム
                             frameIndex++;
-                            setTimeout(recordFrame, frameDelay);
+                            
+                            // タイミング調整
+                            const elapsedTime = Date.now() - startTime;
+                            const expectedTime = frameIndex * frameDelay;
+                            const delay = Math.max(0, expectedTime - elapsedTime);
+                            
+                            setTimeout(recordFrame, delay);
                         } else {
-                            // 録画終了
+                            // 最後のフレームを少し保持
                             setTimeout(() => {
+                                console.log('Stopping recording');
                                 mediaRecorder.stop();
-                            }, 100);
+                            }, 500);
                         }
                     }
                     
-                    recordFrame();
+                    // 最初のフレームを表示してから録画開始
+                    ctx.putImageData(frames[0], 0, 0);
+                    setTimeout(recordFrame, 100);
                     
                 } catch (error) {
                     console.error('Video creation error:', error);
@@ -704,43 +732,127 @@
             }
         }
 
-        // ダウンロード機能（MP4形式 - 実際はWebMだが互換性のため）
+        // ダウンロード機能（MP4形式）
         document.getElementById('downloadBtn').addEventListener('click', async function() {
             if (frames.length === 0) return;
             
             document.getElementById('downloadBtn').disabled = true;
-            document.getElementById('downloadBtn').textContent = '⏳ 準備中...';
+            document.getElementById('downloadBtn').textContent = '⏳ 動画生成中...';
             
             try {
-                // MP4は直接生成できないため、WebMを生成して拡張子をmp4にする
-                // 多くのプレーヤーはWebMコンテナのmp4も再生可能
-                if (!videoBlob) {
-                    const canvas = document.getElementById('canvas');
-                    await createVideoBlob(canvas.width, canvas.height, 30);
-                }
+                // 毎回新しく動画を生成して確実にデータが入るようにする
+                const canvas = document.getElementById('canvas');
+                const ctx = canvas.getContext('2d');
+                const fps = 30;
                 
-                if (videoBlob) {
-                    const url = URL.createObjectURL(videoBlob);
-                    const link = document.createElement('a');
-                    link.download = `aha_experience_${Date.now()}.mp4`; // 拡張子をmp4に
-                    link.href = url;
-                    link.style.display = 'none';
-                    document.body.appendChild(link);
-                    link.click();
-                    document.body.removeChild(link);
+                // 新しいBlobを生成
+                await new Promise((resolve) => {
+                    const stream = canvas.captureStream(fps);
                     
-                    // クリーンアップ
-                    setTimeout(() => {
-                        URL.revokeObjectURL(url);
-                    }, 100);
+                    // ブラウザ互換性のためのMIMEタイプ選択
+                    let mimeType = 'video/webm';
+                    const types = [
+                        'video/webm;codecs=h264', // H.264は互換性が高い
+                        'video/webm;codecs=vp9',
+                        'video/webm;codecs=vp8',
+                        'video/webm'
+                    ];
                     
-                    showStatus('動画をダウンロードしました（プレーヤーで再生可能）', 'success');
-                } else {
-                    showStatus('動画の生成に失敗しました。GIF形式でお試しください。', 'error');
-                }
+                    for (const type of types) {
+                        if (MediaRecorder.isTypeSupported(type)) {
+                            mimeType = type;
+                            console.log('Selected MIME type:', type);
+                            break;
+                        }
+                    }
+                    
+                    const chunks = [];
+                    const recorder = new MediaRecorder(stream, {
+                        mimeType: mimeType,
+                        videoBitsPerSecond: 8000000 // 8Mbps（高品質）
+                    });
+                    
+                    recorder.ondataavailable = (e) => {
+                        if (e.data && e.data.size > 0) {
+                            chunks.push(e.data);
+                        }
+                    };
+                    
+                    recorder.onstop = () => {
+                        // MP4として保存（実際はWebMだが多くのプレーヤーで再生可能）
+                        const blob = new Blob(chunks, { type: 'video/mp4' });
+                        
+                        if (blob.size > 0) {
+                            const url = URL.createObjectURL(blob);
+                            const link = document.createElement('a');
+                            link.download = `aha_experience_${Date.now()}.mp4`;
+                            link.href = url;
+                            link.style.display = 'none';
+                            document.body.appendChild(link);
+                            link.click();
+                            document.body.removeChild(link);
+                            
+                            setTimeout(() => {
+                                URL.revokeObjectURL(url);
+                            }, 1000);
+                            
+                            showStatus('MP4動画をダウンロードしました', 'success');
+                        } else {
+                            showStatus('動画の生成に失敗しました', 'error');
+                        }
+                        
+                        resolve();
+                    };
+                    
+                    recorder.onerror = (error) => {
+                        console.error('Recording error:', error);
+                        showStatus('録画エラーが発生しました', 'error');
+                        resolve();
+                    };
+                    
+                    // 録画開始（データを細かく取得）
+                    recorder.start(10);
+                    
+                    // アニメーションを再生しながら録画
+                    let frameIndex = 0;
+                    const totalFrames = frames.length;
+                    const frameDelay = 1000 / fps;
+                    
+                    // プログレス表示
+                    document.getElementById('progressBar').style.display = 'block';
+                    
+                    function playAndRecord() {
+                        if (frameIndex < totalFrames) {
+                            // フレームを描画
+                            ctx.putImageData(frames[frameIndex], 0, 0);
+                            
+                            // プログレス更新
+                            const progress = Math.floor((frameIndex / totalFrames) * 100);
+                            document.getElementById('progressFill').style.width = progress + '%';
+                            document.getElementById('progressFill').textContent = progress + '%';
+                            
+                            frameIndex++;
+                            setTimeout(playAndRecord, frameDelay);
+                        } else {
+                            // 最後のフレームを保持してから停止
+                            ctx.putImageData(frames[frames.length - 1], 0, 0);
+                            setTimeout(() => {
+                                recorder.stop();
+                                document.getElementById('progressBar').style.display = 'none';
+                            }, 500);
+                        }
+                    }
+                    
+                    // 最初のフレームを表示
+                    ctx.putImageData(frames[0], 0, 0);
+                    
+                    // 少し待ってから録画開始（最初のフレームを確実に記録）
+                    setTimeout(playAndRecord, 100);
+                });
+                
             } catch (error) {
                 console.error('Download error:', error);
-                showStatus('ダウンロードに失敗しました', 'error');
+                showStatus('ダウンロードに失敗しました。GIF形式をお試しください。', 'error');
             }
             
             document.getElementById('downloadBtn').disabled = false;
